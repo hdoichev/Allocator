@@ -15,24 +15,16 @@ public class Allocator {
     let MEMORY_ALIGNMENT: Int = 8
     let REGION_PAGE_DEFRAG_THRESHOLD: Int = 5
     ///
-    enum Flags: Int {
-        case None = 0
-        case Root
-    }
-    ///
     public struct Chunk {
         public let address: Int
         public let count: Int
-        let flags: Flags
         public init() {
             address = Int.max
             count = 0
-            flags = .None
         }
-        init(address: Int, count: Int, flags: Flags) {
+        init(address: Int, count: Int) {
             self.address = address
             self.count = count
-            self.flags = flags
         }
         public var isValid: Bool { return address != Int.max && count != 0 }
     }
@@ -49,9 +41,10 @@ public class Allocator {
     public var totalDeallocsCount: Int { return _deallocsCount }
     public var defragsCount: Int { return _defragesCount }
     
-    public var freeChunksCount: Int { return _regions.reduce(_free.count) { return $0 + $1.free.count } }
-    public var freeByteCount: Int { return _regions.reduce(_free.reduce(0) { return $0 + $1.count}) { return $0 + $1.free.reduce(0, { $0 + $1.count  })  }}
-    ///
+    public var freeChunksCount: Int { return _regions.reduce(_free.count) { $0 + $1.free.count } }
+    public var freeByteCount: Int { return _regions.reduce(_free.reduce(0) { $0 + $1.count}) { $0 + $1.free.reduce(0, { $0 + $1.count  })  }}
+    /// Region contains chunks of the same size.
+    /// The stored chunks are not ordered in any way.
     struct Region {
         let elementStride: Int
         let pageSize: Int
@@ -61,7 +54,7 @@ public class Allocator {
     var _regions =  Regions()
     ///
     public init(capacity: Int, start address: Int = 0) {
-        _free.append(Chunk(address: address, count: capacity, flags: .Root))
+        _free.append(Chunk(address: address, count: capacity))
         let REGION_PAGE_BYTE_COUNT:Int = 8*1024
         // Init regions by count size
         let p:ContiguousArray<Int> =
@@ -76,12 +69,6 @@ public class Allocator {
                                    free: Chunks()))
         }
     }
-    /// TODO: is this needed???
-    static func calculateRegionPageSize(_ capacity: Int) -> Int {
-        let l = log2(Double(capacity))
-        let computed = Int(pow(2.0, 1.0 + Double(Int(l)/8)))
-        return (computed >= 8) ? computed: 8
-    }
     ///
     func getChunk(from region: Int) -> Chunk? {
         guard _regions[region].free.isEmpty == true else { return _regions[region].free.removeLast() }
@@ -95,7 +82,7 @@ public class Allocator {
         }
     }
     ///
-    func findBestMatch(_ val:Int, _ overhead: Int) -> Int {
+    func findBestFitRegion(_ val:Int, _ overhead: Int) -> Int {
         let c = _regions.findInsertPosition(val, orderedBy: \.elementStride, compare: <)
         guard c < _regions.count else { return c - 1 }
         if c > 1 {
@@ -114,7 +101,23 @@ public class Allocator {
     public func deallocate(chunks: Chunks) {
         chunks.forEach{ deallocate($0) }
     }
+    /// Allocate space in a non contiguous form. The returned Chunks has a combined count
+    /// greater than (or equal) to count. The individual chunks can be of different sizes.
+    /// When overhead is non 0 for each chunk (in Chunks) an additinal overhead count is added
+    /// to the total allocation. In that case it is guaranteed that each chunk will be greater than overhead.
     ///
+    ///     var chunks = allocator.allocate(1024)
+    ///     print(chunks.reduce(0) { $0 + $1.count })
+    ///     print(chunks.allocatedCount) // same as above
+    ///     // prints 1024
+    ///
+    ///     // allocate a total of at least 1024 and add 12 overhead for each chunk
+    ///     var chunks = allocator.allocate(1024, 12)
+    ///     var total_overhead = chunks.count * 12
+    ///     print((chunks.reduce(0) { $0 + $1.count } - total_overhead) >= 1024)
+    ///     print((chunks.allocatedCount - total_overhead) > 1024) // same as above
+    ///     // prints true
+    ///     
     public func allocate(_ count: Int, _ overhead: Int = 0) -> Chunks? {
         var remaining = count
         var chunksChain = Chunks()
@@ -122,7 +125,7 @@ public class Allocator {
         var lookupBestRegion = true
         while remaining > 0 {
             if lookupBestRegion {
-                bestRegion = findBestMatch(remaining + overhead, overhead)
+                bestRegion = findBestFitRegion(remaining + overhead, overhead)
             }
             let c = getChunk(from: bestRegion)
             if c == nil {
@@ -166,7 +169,7 @@ public class Allocator {
     }
     ///
     public func deallocate(address: Int, count: Int) {
-        self.deallocate(Chunk(address: address, count: count, flags: .None))
+        self.deallocate(Chunk(address: address, count: count))
     }
     ///
     public func deallocate(_ chunk: Chunk) {
@@ -198,9 +201,9 @@ public class Allocator {
         let chunk = _free.remove(at: position)
         
         if chunk.count > allignedCount {
-            _free.insert(Chunk(address: chunk.address + allignedCount, count: chunk.count - allignedCount, flags: .Root), orderedBy: \.count)
+            _free.insert(Chunk(address: chunk.address + allignedCount, count: chunk.count - allignedCount), orderedBy: \.count)
         }
-        return Chunk(address: chunk.address, count: allignedCount, flags: .Root)
+        return Chunk(address: chunk.address, count: allignedCount)
     }
     ///
     func reclaimFreeStorage(_ chunk: Chunk) {
@@ -219,14 +222,12 @@ public class Allocator {
         sorted.forEach { c in
             guard curChunk.address != c.address else { return } // first element. It is already curChunk
             if curChunk.address+curChunk.count == c.address {
-                curChunk = Chunk(address: curChunk.address, count: curChunk.count+c.count, flags: .Root)
+                curChunk = Chunk(address: curChunk.address, count: curChunk.count+c.count)
             } else {
                 _free.append(curChunk)
-//                _free.insertOrderedByCount(curChunk)
                 curChunk = c
             }
         }
-//        _free.insertOrderedByCount(curChunk)
         _free.append(curChunk)
         _free.sort { $0.count < $1.count }
     }
@@ -250,7 +251,7 @@ public class Allocator {
                 }
             }
             if chunk_count == pageByteCount {
-                coalesced.append(Chunk(address: start_address, count: chunk_count, flags: .Root))
+                coalesced.append(Chunk(address: start_address, count: chunk_count))
                 start_address = Int.max
                 chunk_count = 0
             }

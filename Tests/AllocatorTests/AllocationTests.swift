@@ -92,7 +92,7 @@ final class AllocatorTests: XCTestCase {
         var a = allocator.allocate(FREE_MEMORY_COUNT_4GB / 2, overhead)
         XCTAssertNotNil(a, "Should have allocated an object (Chunks)")
         let allocOverhead = overhead * a!.count
-        
+        print((a!.allocatedCount - allocOverhead) >= (FREE_MEMORY_COUNT_4GB / 2))
         XCTAssertGreaterThanOrEqual(a!.allocatedCount, allocOverhead + (FREE_MEMORY_COUNT_4GB / 2), "Should be the space + overhead per page")
         XCTAssertLessThanOrEqual(allocator.freeByteCount, (FREE_MEMORY_COUNT_4GB / 2) - allocOverhead, "Should have no more space to allocate")
         a?.deallocate(allocator)
