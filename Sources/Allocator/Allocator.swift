@@ -113,7 +113,7 @@ public class Allocator {
         chunks.forEach{ deallocate($0) }
     }
     ///
-    public func allocate2(_ count: Int, _ overhead: Int = 0) -> Chunks? {
+    public func allocate(_ count: Int, _ overhead: Int = 0) -> Chunks? {
         var remaining = count
         var chunksChain = Chunks()
         while remaining > 0 {
