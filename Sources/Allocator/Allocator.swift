@@ -6,11 +6,13 @@
 //
 
 import Foundation
-/// ==========================================
+
+/// Allocate chunks of space.
+/// Can provide contiguous chunks of space and also space represented by a seried of contiguous chunks.
 ///
 ///
 public class Allocator {
-    let MEMORY_ALIGNMENT: Int = 1
+    let MEMORY_ALIGNMENT: Int = 8
     let REGION_PAGE_DEFRAG_THRESHOLD: Int = 5
     ///
     enum Flags: Int {
@@ -52,31 +54,13 @@ public class Allocator {
         let elementStride: Int
         let pageSize: Int
         var free: Chunks
-        ///
-        mutating func addFreeSpace(_ freeChunk: Chunk) {
-            guard (freeChunk.count % elementStride) == 0 else { fatalError("Invalid chunk byte count: \(freeChunk.count) != \(elementStride * pageSize)")}
-            var cflags = Allocator.Flags.Root
-            for i in stride(from: 0, through: freeChunk.count - 1, by: Int.Stride(elementStride)) {
-                free.append(Chunk(address: freeChunk.address + i, count: elementStride, flags: cflags))
-//                free.insert(Chunk(address: freeChunk.address + i, count: maxCount, flags: cflags), orderedBy: \.address)
-                cflags = .None
-            }
-        }
-        mutating func deallocate(_ chunk: Chunk) {
-            guard chunk.count == elementStride else { fatalError("Invalid Chunk count: \(chunk.count) instead of \(elementStride)") }
-//            free.insert(chunk, orderedBy: \.address)
-            free.append(chunk)
-        }
-        mutating func removeAllFree() { free.removeAll() }
-        mutating func updateFreeSpace(_ block: (/*maxCount*/Int, /*pageSize*/Int, inout Chunks)->Void) { block(elementStride, pageSize, &free) }
     }
     typealias Regions = ContiguousArray<Region>
     var _regions =  Regions()
     ///
     public init(capacity: Int, start address: Int = 0) {
         _free.append(Chunk(address: address, count: capacity, flags: .Root))
-//        REGION_PAGE_BYTE_COUNT = Allocator.calculateRegionPageSize(capacity)
-        let PAGE_BYTE_COUNT:Int = 4*1024
+        let REGION_PAGE_BYTE_COUNT:Int = 8*1024
         // Init regions by count size
         let p:ContiguousArray<Int> =
         [      32,       64,      128,       256,
@@ -85,20 +69,18 @@ public class Allocator {
          128*1024, 256*1024, 512*1024, 1024*1024]
         _sumOfLowerRegionsSizes = p.sunOfLowerElements()
         p.forEach {
-//            if $0 <= MEMORY_ALIGNMENT {
-                _regions.append(Region(elementStride: $0,
-                                       pageSize: (PAGE_BYTE_COUNT > $0) ? PAGE_BYTE_COUNT / $0: 1,
-                                       free: Chunks()))
-//            }
+            _regions.append(Region(elementStride: $0,
+                                   pageSize: (REGION_PAGE_BYTE_COUNT > $0) ? REGION_PAGE_BYTE_COUNT / $0: 1,
+                                   free: Chunks()))
         }
     }
-    /// TODO: ???
+    /// TODO: is this needed???
     static func calculateRegionPageSize(_ capacity: Int) -> Int {
         let l = log2(Double(capacity))
         let computed = Int(pow(2.0, 1.0 + Double(Int(l)/8)))
         return (computed >= 8) ? computed: 8
     }
-    //
+    ///
     func getChunk(from region: Int) -> Chunk? {
         guard _regions[region].free.isEmpty == true else { return _regions[region].free.removeLast() }
         guard let freeChunk = reserveFreeStorage(count: _regions[region].elementStride * _regions[region].pageSize) else {
@@ -110,10 +92,7 @@ public class Allocator {
             return freeChunk
         }
     }
-    //
-    public func deallocate(chunks: Chunks) {
-        chunks.forEach{ deallocate($0) }
-    }
+    ///
     func findBestMatch(_ val:Int, _ overhead: Int) -> Chunk? {
         let c = _regions.findInsertPosition(val, orderedBy: \.elementStride, compare: <)
         guard c < _regions.count else { return getChunk(from: c - 1)}
@@ -129,6 +108,11 @@ public class Allocator {
         }
         return getChunk(from: c)
     }
+    ///
+    public func deallocate(chunks: Chunks) {
+        chunks.forEach{ deallocate($0) }
+    }
+    ///
     public func allocate2(_ count: Int, _ overhead: Int = 0) -> Chunks? {
         var remaining = count
         var chunksChain = Chunks()
@@ -156,9 +140,11 @@ public class Allocator {
         guard remaining == 0 else { deallocate(chunks: chunksChain); return nil }
         return chunksChain
     }
-
+    /// Allocate a contiguous chunk.
     ///
-    public func allocate(count: Int) -> Chunk? {
+    /// - returns nil: if no contiguous chunk can not be found
+    ///
+    public func allocate(contiguous count: Int) -> Chunk? {
         let regpos = _regions.findInsertPosition(count, orderedBy: \.elementStride, compare: <)
         guard regpos != _regions.count else { return reserveFreeStorage(count: count) }// super.allocate(count: count) }
         guard _regions[regpos].free.isEmpty else { return _regions[regpos].free.removeLast() }
@@ -196,7 +182,6 @@ public class Allocator {
             position = _free.findInsertPosition(allignedCount, orderedBy: \.count, compare: <)
         }
         guard position != _free.count else {
-//            print("Dohhh .... count: ", count)
             return nil
         }
         let chunk = _free.remove(at: position)
@@ -206,6 +191,7 @@ public class Allocator {
         }
         return Chunk(address: chunk.address, count: allignedCount, flags: .Root)
     }
+    ///
     func reclaimFreeStorage(_ chunk: Chunk) {
         _free.insert(chunk, orderedBy: \.count)
         _defragged = false
@@ -229,7 +215,7 @@ public class Allocator {
                 curChunk = c
             }
         }
-        //        _free.insertOrderedByCount(curChunk)
+//        _free.insertOrderedByCount(curChunk)
         _free.append(curChunk)
         _free.sort { $0.count < $1.count }
     }
