@@ -243,21 +243,35 @@ public class Allocator {
                     }
                     if chunk_count == pageByteCount {
                         pageChunks.append(Chunk(address: start_address, count: chunk_count, flags: .Root))
-                        //                        print("Found page: ragion[\(i)] pageByteCount = \(pageByteCount)")
                         start_address = Int.max
                         chunk_count = 0
                     }
                 }
                 if pageChunks.isEmpty == false {
+                    var chunksThatRemain = Chunks()
+                    var pos = 0
+                    let free_count = _regions[i].free.count
                     for chunkToMove in pageChunks {
-                        let removeRange = (chunkToMove.address..<chunkToMove.address + chunkToMove.count)
-                        _regions[i].free.removeAll { removeRange.contains( $0.address ) }
-                        //                        _free.insert(chunkToMove, orderedBy: \.count)
-                        // _free will be coalesced later on, so no need to place the chunk in it proper position here.
                         _free.append(chunkToMove)
                         _defragged = false
                         _deallocsCount += 1
+                        let removeRange = (chunkToMove.address..<chunkToMove.address + chunkToMove.count)
+                        while pos != free_count {
+                            if removeRange.contains( _regions[i].free[pos].address ) {
+                                // skip over consequtive chunks that should be excluded from the current page
+                                while pos != free_count && removeRange.contains( _regions[i].free[pos].address ) { pos += 1 }
+                                break // found first chunk that is outside the current exclusion range
+                            } else {
+                                chunksThatRemain.append(_regions[i].free[pos])
+                                pos += 1
+                            }
+                        }
                     }
+                    // move all remaining, if any
+                    for toRemain in pos..<free_count {
+                        chunksThatRemain.append(_regions[i].free[toRemain])
+                    }
+                    _regions[i].free = chunksThatRemain
                 }
             }
         }
