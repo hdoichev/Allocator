@@ -86,4 +86,17 @@ final class AllocatorTests: XCTestCase {
         large?.deallocate(allocator)
         XCTAssertEqual(allocator.freeByteCount, 5244160, "Should have half space available")
     }
+    func testAllocateAllWithOverhead() {
+        let overhead = MemoryLayout<Allocator.Chunk>.size
+        let allocator = Allocator(capacity: FREE_MEMORY_COUNT_4GB)
+        var a = allocator.allocate(FREE_MEMORY_COUNT_4GB / 2, overhead)
+        XCTAssertNotNil(a, "Should have allocated an object (Chunks)")
+        let allocOverhead = overhead * a!.count
+        
+        XCTAssertGreaterThanOrEqual(a!.allocatedCount, allocOverhead + (FREE_MEMORY_COUNT_4GB / 2), "Should be the space + overhead per page")
+        XCTAssertLessThanOrEqual(allocator.freeByteCount, (FREE_MEMORY_COUNT_4GB / 2) - allocOverhead, "Should have no more space to allocate")
+        a?.deallocate(allocator)
+        XCTAssertEqual(a?.allocatedCount, 0, "Should contain no space at all")
+        XCTAssertEqual(allocator.freeByteCount, FREE_MEMORY_COUNT_4GB, "Should have all of the space available")
+    }
 }

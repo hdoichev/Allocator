@@ -42,10 +42,12 @@ public class Allocator {
     let _sumOfLowerRegionsSizes: ContiguousArray<Int>
     var _defragged: Bool = false
     var _deallocsCount: Int = 0
+    var _defragesCount: Int = 0
     var _totalDeallocatedByteCount: Int = 0
     ///
     public var totalDeallocatedByteCount: Int { return _totalDeallocatedByteCount }
     public var totalDeallocsCount: Int { return _deallocsCount }
+    public var defragsCount: Int { return _defragesCount }
     
     public var freeChunksCount: Int { return _regions.reduce(_free.count) { return $0 + $1.free.count } }
     public var freeByteCount: Int { return _regions.reduce(_free.reduce(0) { return $0 + $1.count}) { return $0 + $1.free.reduce(0, { $0 + $1.count  })  }}
@@ -229,60 +231,65 @@ public class Allocator {
         _free.sort { $0.count < $1.count }
     }
     ///
-    public func defrag(purge: Bool = false) {
-        for i in 0..<_regions.count {
-            if purge || _regions[i].free.count >= (_regions[i].pageSize * REGION_PAGE_DEFRAG_THRESHOLD) {
-                let pageByteCount = _regions[i].pageSize * _regions[i].elementStride
-                _regions[i].free.sort { $0.address < $1.address }
-                var start_address = Int.max
-                var chunk_count:Int = 0
-                var pageChunks = Chunks()
-                
-                for e in _regions[i].free {
-                    if start_address == Int.max && e.flags == .Root {
-                        start_address = e.address
-                        chunk_count = e.count
-                    } else {
-                        if start_address != Int.max && (start_address + chunk_count) == e.address {
-                            chunk_count += e.count
-                        } else {
-                            start_address = Int.max
-                            chunk_count = 0
-                        }
-                    }
-                    if chunk_count == pageByteCount {
-                        pageChunks.append(Chunk(address: start_address, count: chunk_count, flags: .Root))
-                        start_address = Int.max
-                        chunk_count = 0
-                    }
-                }
-                if pageChunks.isEmpty == false {
-                    var chunksThatRemain = Chunks()
-                    var pos = 0
-                    let free_count = _regions[i].free.count
-                    for chunkToMove in pageChunks {
-                        _free.append(chunkToMove)
-                        _defragged = false
-                        _deallocsCount += 1
-                        let removeRange = (chunkToMove.address..<chunkToMove.address + chunkToMove.count)
-                        while pos != free_count {
-                            if removeRange.contains( _regions[i].free[pos].address ) {
-                                // skip over consequtive chunks that should be excluded from the current page
-                                while pos != free_count && removeRange.contains( _regions[i].free[pos].address ) { pos += 1 }
-                                break // found first chunk that is outside the current exclusion range
-                            } else {
-                                chunksThatRemain.append(_regions[i].free[pos])
-                                pos += 1
-                            }
-                        }
-                    }
-                    // move all remaining, if any
-                    for toRemain in pos..<free_count {
-                        chunksThatRemain.append(_regions[i].free[toRemain])
-                    }
-                    _regions[i].free = chunksThatRemain
+    func coalesceRegion(region: inout Region, coalesced: inout Chunks) {
+        let pageByteCount = region.pageSize * region.elementStride
+        region.free.sort { $0.address < $1.address }
+        var start_address = Int.max
+        var chunk_count:Int = 0
+        
+        for e in region.free {
+            if start_address == Int.max /*&& e.flags == .Root*/ {
+                start_address = e.address
+                chunk_count = e.count
+            } else {
+                if start_address != Int.max && (start_address + chunk_count) == e.address {
+                    chunk_count += e.count
+                } else {
+                    start_address = Int.max
+                    chunk_count = 0
                 }
             }
+            if chunk_count == pageByteCount {
+                coalesced.append(Chunk(address: start_address, count: chunk_count, flags: .Root))
+                start_address = Int.max
+                chunk_count = 0
+            }
+        }
+    }
+    ///
+    public func defrag(purge: Bool = false) {
+        _defragesCount += 1
+        for i in 0..<_regions.count {
+//            if purge || _regions[i].free.count >= (_regions[i].pageSize * REGION_PAGE_DEFRAG_THRESHOLD) {
+            var coalscedChunks = Chunks()
+            coalesceRegion(region: &_regions[i], coalesced: &coalscedChunks)
+            if coalscedChunks.isEmpty == false {
+                var chunksThatRemain = Chunks()
+                var pos = 0
+                let free_count = _regions[i].free.count
+                for chunkToMove in coalscedChunks {
+                    _free.append(chunkToMove)
+                    _defragged = false
+                    _deallocsCount += 1
+                    let removeRange = (chunkToMove.address..<chunkToMove.address + chunkToMove.count)
+                    while pos != free_count {
+                        if removeRange.contains( _regions[i].free[pos].address ) {
+                            // skip over consequtive chunks that should be excluded from the current page
+                            while pos != free_count && removeRange.contains( _regions[i].free[pos].address ) { pos += 1 }
+                            break // found first chunk that is outside the current exclusion range
+                        } else {
+                            chunksThatRemain.append(_regions[i].free[pos])
+                            pos += 1
+                        }
+                    }
+                }
+                // move all remaining, if any
+                for toRemain in pos..<free_count {
+                    chunksThatRemain.append(_regions[i].free[toRemain])
+                }
+                _regions[i].free = chunksThatRemain
+            }
+//            }
         }
         guard _defragged == false else { return }
         //
