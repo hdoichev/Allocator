@@ -10,8 +10,8 @@ import Foundation
 ///
 ///
 public class Allocator {
-    let MEMORY_ALIGNMENT: UInt64 = 1
-    let REGION_PAGE_DEFRAG_THRESHOLD: UInt64 = 5
+    let MEMORY_ALIGNMENT: Int = 1
+    let REGION_PAGE_DEFRAG_THRESHOLD: Int = 5
     ///
     enum Flags: Int {
         case None = 0
@@ -19,44 +19,44 @@ public class Allocator {
     }
     ///
     public struct Chunk {
-        public let address: UInt64
-        public let count: UInt64
+        public let address: Int
+        public let count: Int
         let flags: Flags
         public init() {
-            address = UInt64.max
+            address = Int.max
             count = 0
             flags = .None
         }
-        init(address: UInt64, count: UInt64, flags: Flags) {
+        init(address: Int, count: Int, flags: Flags) {
             self.address = address
             self.count = count
             self.flags = flags
         }
-        public var isValid: Bool { return address != UInt64.max && count != 0 }
+        public var isValid: Bool { return address != Int.max && count != 0 }
     }
     ///
     public typealias Chunks = ContiguousArray<Chunk>
     var _free = Chunks()
-    let _sumOfLowerRegionsSizes: ContiguousArray<UInt64>
+    let _sumOfLowerRegionsSizes: ContiguousArray<Int>
     var _defragged: Bool = false
     var _deallocsCount: Int = 0
-    var _totalDeallocatedByteCount: UInt64 = 0
+    var _totalDeallocatedByteCount: Int = 0
     ///
-    public var totalDeallocatedByteCount: UInt64 { return _totalDeallocatedByteCount }
+    public var totalDeallocatedByteCount: Int { return _totalDeallocatedByteCount }
     public var totalDeallocsCount: Int { return _deallocsCount }
     
     public var freeChunksCount: Int { return _regions.reduce(_free.count) { return $0 + $1.free.count } }
-    public var freeByteCount: UInt64 { return _regions.reduce(_free.reduce(0) { return $0 + $1.count}) { return $0 + $1.free.reduce(0, { $0 + $1.count  })  }}
+    public var freeByteCount: Int { return _regions.reduce(_free.reduce(0) { return $0 + $1.count}) { return $0 + $1.free.reduce(0, { $0 + $1.count  })  }}
     ///
     struct Region {
-        let elementStride: UInt64
-        let pageSize: UInt64
+        let elementStride: Int
+        let pageSize: Int
         var free: Chunks
         ///
         mutating func addFreeSpace(_ freeChunk: Chunk) {
             guard (freeChunk.count % elementStride) == 0 else { fatalError("Invalid chunk byte count: \(freeChunk.count) != \(elementStride * pageSize)")}
             var cflags = Allocator.Flags.Root
-            for i in stride(from: 0, through: freeChunk.count - 1, by: UInt64.Stride(elementStride)) {
+            for i in stride(from: 0, through: freeChunk.count - 1, by: Int.Stride(elementStride)) {
                 free.append(Chunk(address: freeChunk.address + i, count: elementStride, flags: cflags))
 //                free.insert(Chunk(address: freeChunk.address + i, count: maxCount, flags: cflags), orderedBy: \.address)
                 cflags = .None
@@ -68,17 +68,17 @@ public class Allocator {
             free.append(chunk)
         }
         mutating func removeAllFree() { free.removeAll() }
-        mutating func updateFreeSpace(_ block: (/*maxCount*/UInt64, /*pageSize*/UInt64, inout Chunks)->Void) { block(elementStride, pageSize, &free) }
+        mutating func updateFreeSpace(_ block: (/*maxCount*/Int, /*pageSize*/Int, inout Chunks)->Void) { block(elementStride, pageSize, &free) }
     }
     typealias Regions = ContiguousArray<Region>
     var _regions =  Regions()
     ///
-    public init(capacity: UInt64, start address: UInt64 = 0) {
+    public init(capacity: Int, start address: Int = 0) {
         _free.append(Chunk(address: address, count: capacity, flags: .Root))
 //        REGION_PAGE_BYTE_COUNT = Allocator.calculateRegionPageSize(capacity)
-        let PAGE_BYTE_COUNT:UInt64 = 4*1024
+        let PAGE_BYTE_COUNT:Int = 4*1024
         // Init regions by count size
-        let p:ContiguousArray<UInt64> =
+        let p:ContiguousArray<Int> =
         [      32,       64,      128,       256,
               512,     1024,     2048,      4096,
              8192,    16384,    32768,     65536,
@@ -93,9 +93,9 @@ public class Allocator {
         }
     }
     /// TODO: ???
-    static func calculateRegionPageSize(_ capacity: UInt64) -> UInt64 {
+    static func calculateRegionPageSize(_ capacity: Int) -> Int {
         let l = log2(Double(capacity))
-        let computed = UInt64(pow(2.0, 1.0 + Double(Int(l)/8)))
+        let computed = Int(pow(2.0, 1.0 + Double(Int(l)/8)))
         return (computed >= 8) ? computed: 8
     }
     //
@@ -114,13 +114,13 @@ public class Allocator {
     public func deallocate(chunks: Chunks) {
         chunks.forEach{ deallocate($0) }
     }
-    func findBestMatch(_ val:UInt64, _ overhead: UInt64) -> Chunk? {
+    func findBestMatch(_ val:Int, _ overhead: Int) -> Chunk? {
         let c = _regions.findInsertPosition(val, orderedBy: \.elementStride, compare: <)
         guard c < _regions.count else { return getChunk(from: c - 1)}
         if c > 1 {
             if _regions[c].elementStride > val && _regions[c-1].elementStride > overhead {
                 let upperBound = _regions[c].elementStride - val
-                var estimateLowerBound = _sumOfLowerRegionsSizes[c] - (UInt64(c) * overhead)
+                var estimateLowerBound = _sumOfLowerRegionsSizes[c] - (c * overhead)
                 estimateLowerBound = estimateLowerBound > val ? estimateLowerBound - val: val - estimateLowerBound
                 if upperBound > estimateLowerBound {
                     return getChunk(from: c - 1)
@@ -129,14 +129,14 @@ public class Allocator {
         }
         return getChunk(from: c)
     }
-    public func allocate2(_ count: UInt64, _ overhead: UInt64 = 0) -> Chunks? {
+    public func allocate2(_ count: Int, _ overhead: Int = 0) -> Chunks? {
         var remaining = count
         var chunksChain = Chunks()
         while remaining > 0 {
             var c = findBestMatch(remaining + overhead, overhead)
             if c == nil {
                 // Try to allocate smaller sizes.
-                for n:UInt64 in [2,4,8,16,32,64] {
+                for n:Int in [2,4,8,16,32,64] {
                     let smallerAllocSize = remaining / n
                     if smallerAllocSize < _regions[0].elementStride {
                         break // too small to continue. There is no point???
@@ -150,7 +150,7 @@ public class Allocator {
             if (remaining + overhead) < c.count {
                 remaining = 0
             } else {
-                remaining = remaining.decrement(c.count - overhead)
+                remaining = remaining.decrementedClampToZero(c.count - overhead)
             }
         }
         guard remaining == 0 else { deallocate(chunks: chunksChain); return nil }
@@ -158,7 +158,7 @@ public class Allocator {
     }
 
     ///
-    public func allocate(count: UInt64) -> Chunk? {
+    public func allocate(count: Int) -> Chunk? {
         let regpos = _regions.findInsertPosition(count, orderedBy: \.elementStride, compare: <)
         guard regpos != _regions.count else { return reserveFreeStorage(count: count) }// super.allocate(count: count) }
         guard _regions[regpos].free.isEmpty else { return _regions[regpos].free.removeLast() }
@@ -168,7 +168,7 @@ public class Allocator {
         return _regions[regpos].free.removeLast()
     }
     ///
-    public func deallocate(address: UInt64, count: UInt64) {
+    public func deallocate(address: Int, count: Int) {
         self.deallocate(Chunk(address: address, count: count, flags: .None))
     }
     ///
@@ -184,7 +184,7 @@ public class Allocator {
         _regions[regpos].deallocate(chunk)
     }
     ///
-    func reserveFreeStorage(count: UInt64) -> Chunk?{
+    func reserveFreeStorage(count: Int) -> Chunk?{
         // Allign free storage size
         let allignedCount = ((count % MEMORY_ALIGNMENT) == 0) ? count:
                                                                ((count/MEMORY_ALIGNMENT)+1) * MEMORY_ALIGNMENT
@@ -239,26 +239,26 @@ public class Allocator {
             if purge || _regions[i].free.count >= (_regions[i].pageSize * REGION_PAGE_DEFRAG_THRESHOLD) {
                 let pageByteCount = _regions[i].pageSize * _regions[i].elementStride
                 _regions[i].free.sort { $0.address < $1.address }
-                var start_address = UInt64.max
-                var chunk_count:UInt64 = 0
+                var start_address = Int.max
+                var chunk_count:Int = 0
                 var pageChunks = Chunks()
                 
                 for e in _regions[i].free {
-                    if start_address == UInt64.max && e.flags == .Root {
+                    if start_address == Int.max && e.flags == .Root {
                         start_address = e.address
                         chunk_count = e.count
                     } else {
-                        if start_address != UInt64.max && (start_address + chunk_count) == e.address {
+                        if start_address != Int.max && (start_address + chunk_count) == e.address {
                             chunk_count += e.count
                         } else {
-                            start_address = UInt64.max
+                            start_address = Int.max
                             chunk_count = 0
                         }
                     }
                     if chunk_count == pageByteCount {
                         pageChunks.append(Chunk(address: start_address, count: chunk_count, flags: .Root))
                         //                        print("Found page: ragion[\(i)] pageByteCount = \(pageByteCount)")
-                        start_address = UInt64.max
+                        start_address = Int.max
                         chunk_count = 0
                     }
                 }

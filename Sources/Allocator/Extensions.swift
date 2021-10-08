@@ -109,10 +109,10 @@ extension ContiguousArray where Element:BinaryInteger {
     }
 }
 ///
-extension ContiguousArray where Element == UInt64 {
-    func sunOfLowerElements() -> ContiguousArray<UInt64> {
-        var res = ContiguousArray<UInt64>()
-        var sum: UInt64 = 0
+extension ContiguousArray where Element == Int {
+    func sunOfLowerElements() -> ContiguousArray<Int> {
+        var res = ContiguousArray<Int>()
+        var sum: Int = 0
         self.forEach { e in
             res.append(sum)
             sum = sum + e
@@ -157,9 +157,10 @@ extension Array where Element:BinaryInteger {
     }
 }
 ///
-extension UInt64 {
-    func decrement(_ by:UInt64) -> UInt64 {
-        guard self > by else { return 0}
+extension Int {
+    @inlinable
+    public func decrementedClampToZero(_ by:Int) -> Int {
+        guard self > by else { return 0 }
         return self - by
     }
 }
