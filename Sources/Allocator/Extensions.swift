@@ -19,6 +19,7 @@ extension Allocator.Chunks {
         allocator.deallocate(chunks: self)
         self.removeAll()
     }
+    public var allocatedCount: Int { return self.reduce(0){ $0 + $1.count } }
 }
 ///
 extension ContiguousArray {

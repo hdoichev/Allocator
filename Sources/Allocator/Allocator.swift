@@ -93,20 +93,20 @@ public class Allocator {
         }
     }
     ///
-    func findBestMatch(_ val:Int, _ overhead: Int) -> Chunk? {
+    func findBestMatch(_ val:Int, _ overhead: Int) -> Int {
         let c = _regions.findInsertPosition(val, orderedBy: \.elementStride, compare: <)
-        guard c < _regions.count else { return getChunk(from: c - 1)}
+        guard c < _regions.count else { return c - 1 }
         if c > 1 {
             if _regions[c].elementStride > val && _regions[c-1].elementStride > overhead {
                 let upperBound = _regions[c].elementStride - val
                 var estimateLowerBound = _sumOfLowerRegionsSizes[c] - (c * overhead)
                 estimateLowerBound = estimateLowerBound > val ? estimateLowerBound - val: val - estimateLowerBound
                 if upperBound > estimateLowerBound {
-                    return getChunk(from: c - 1)
+                    return c - 1
                 }
             }
         }
-        return getChunk(from: c)
+        return c
     }
     ///
     public func deallocate(chunks: Chunks) {
@@ -116,25 +116,34 @@ public class Allocator {
     public func allocate(_ count: Int, _ overhead: Int = 0) -> Chunks? {
         var remaining = count
         var chunksChain = Chunks()
+        var bestRegion: Int = 0
+        var lookupBestRegion = true
         while remaining > 0 {
-            var c = findBestMatch(remaining + overhead, overhead)
-            if c == nil {
-                // Try to allocate smaller sizes.
-                for n:Int in [2,4,8,16,32,64] {
-                    let smallerAllocSize = remaining / n
-                    if smallerAllocSize < _regions[0].elementStride {
-                        break // too small to continue. There is no point???
-                    }
-                    c = findBestMatch(smallerAllocSize + overhead, overhead)
-                    guard c == nil else { break }
-                }
+            if lookupBestRegion {
+                bestRegion = findBestMatch(remaining + overhead, overhead)
             }
-            guard let c = c else { break } // Done. Can not allocate.
-            chunksChain.append(c)
-            if (remaining + overhead) < c.count {
-                remaining = 0
+            let c = getChunk(from: bestRegion)
+            if c == nil {
+                // Since there wasn't a chunk avaiable, try to use the next smaller chunk size
+                // and keep going down the sizes until there is enough space available or break-out
+                // without allocating anything
+                guard bestRegion > 0 else { break }
+                lookupBestRegion = false // turn off the lookup
+                bestRegion -= 1
+                // Best region must have more space than the overhead.
+                guard _regions[bestRegion].elementStride > overhead else { break }
             } else {
-                remaining = remaining.decrementedClampToZero(c.count - overhead)
+                guard let c = c else { break } // Done. Can not allocate.
+                chunksChain.append(c)
+                if (remaining + overhead) <= c.count {
+                    // the last allocated chunk provides enough space to store all the info
+                    remaining = 0
+                } else {
+                    remaining = remaining.decrementedClampToZero(c.count - overhead)
+                }
+                if (remaining + overhead) < _regions[bestRegion].elementStride {
+                    lookupBestRegion = true // reenable the lookup in case it was turned off.
+                }
             }
         }
         guard remaining == 0 else { deallocate(chunks: chunksChain); return nil }
