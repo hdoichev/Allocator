@@ -55,7 +55,7 @@ public class Allocator {
     ///
     public init(capacity: Int, start address: Int = 0) {
         _free.append(Chunk(address: address, count: capacity))
-        let REGION_PAGE_BYTE_COUNT:Int = 8*1024
+        let REGION_PAGE_BYTE_COUNT:Int = 1*512
         // Init regions by count size
         let p:ContiguousArray<Int> =
         [      32,       64,      128,       256,
@@ -192,8 +192,14 @@ public class Allocator {
         if position == _free.count {
             // Trigger full defrag, looking for memory
             _defragged = false
-            defrag(purge: true)
+            defrag()
             position = _free.findInsertPosition(allignedCount, orderedBy: \.count, compare: <)
+            if position == _free.count {
+                // Lets try a purge. This will dump all regions chunks into the _free pool.
+                _defragged = false
+                defrag(purge: true)
+                position = _free.findInsertPosition(allignedCount, orderedBy: \.count, compare: <)
+            }
         }
         guard position != _free.count else {
             return nil
@@ -268,11 +274,12 @@ public class Allocator {
                 var chunksThatRemain = Chunks()
                 var pos = 0
                 let free_count = _regions[i].free.count
+                _defragged = false
                 for chunkToMove in coalscedChunks {
-                    _free.append(chunkToMove)
-                    _defragged = false
                     _deallocsCount += 1
                     let removeRange = (chunkToMove.address..<chunkToMove.address + chunkToMove.count)
+                    // now go through all _free chunks and skip over the ones that part of the coalesced chunk
+                    // elements that were not coalesced are moved into the chunksThatRemain
                     while pos != free_count {
                         if removeRange.contains( _regions[i].free[pos].address ) {
                             // skip over consequtive chunks that should be excluded from the current page
@@ -284,11 +291,19 @@ public class Allocator {
                         }
                     }
                 }
-                // move all remaining, if any
+                // finsih going through all elements in region._free
                 for toRemain in pos..<free_count {
                     chunksThatRemain.append(_regions[i].free[toRemain])
                 }
-                _regions[i].free = chunksThatRemain
+                _free += coalscedChunks // All of the coalesced chunk go to _free
+                // move all remaining, to the proper location base on 'purge'
+                if purge {
+                    // move every chunk into _free and cleanup the region
+                    _free += chunksThatRemain
+                    _regions[i].free.removeAll()
+                } else {
+                    _regions[i].free = chunksThatRemain
+                }
             }
 //            }
         }

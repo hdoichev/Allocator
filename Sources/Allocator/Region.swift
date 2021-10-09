@@ -14,16 +14,18 @@ extension Allocator.Region {
     ///
     mutating func addFreeSpace(_ freeChunk: Allocator.Chunk) {
         guard (freeChunk.count % elementStride) == 0 else { fatalError("Invalid chunk byte count: \(freeChunk.count) != \(elementStride * pageSize)")}
-        for i in stride(from: 0, through: freeChunk.count - 1, by: Int.Stride(elementStride)) {
+        for i in stride(from: 0, through: freeChunk.count - elementStride, by: elementStride) {
+//        for i in stride(from: freeChunk.count - elementStride, through: 0, by: -elementStride) {
             free.append(Allocator.Chunk(address: freeChunk.address + i, count: elementStride))
-//            free.insert(Chunk(address: freeChunk.address + i, count: maxCount, flags: cflags), orderedBy: \.address)
+//            free.insert(Allocator.Chunk(address: freeChunk.address + i, count: elementStride), orderedBy: \.address)
         }
     }
     /// Deallocate a given chunk and make it available for reuse.
     ///
     /// - parameter chunk: Describes the chunk of space.
     mutating func deallocate(_ chunk: Allocator.Chunk) {
-        guard chunk.count == elementStride else { fatalError("Invalid Chunk count: \(chunk.count) instead of \(elementStride)") }
+        guard chunk.count == elementStride else { fatalError("Invalid chunk byte count: \(chunk.count) != \(elementStride)") }
+//        free.insert(chunk, orderedBy: \.address)
         free.append(chunk)
     }
 }
