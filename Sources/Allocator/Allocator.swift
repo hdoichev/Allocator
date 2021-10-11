@@ -15,14 +15,14 @@ public class Allocator {
     let MEMORY_ALIGNMENT: Int = 8
     let REGION_PAGE_DEFRAG_THRESHOLD: Int = 5
     ///
-    public struct Chunk {
+    public struct Chunk: Codable {
         public let address: Int
         public let count: Int
         public init() {
             address = Int.max
             count = 0
         }
-        init(address: Int, count: Int) {
+        public init(address: Int, count: Int) {
             self.address = address
             self.count = count
         }
@@ -118,7 +118,7 @@ public class Allocator {
     ///     print((chunks.allocatedCount - total_overhead) > 1024) // same as above
     ///     // prints true
     ///     
-    public func allocate(_ count: Int, _ overhead: Int = 0) -> Chunks? {
+    public func allocate(_ count: Int, overhead: Int = 0) -> Chunks? {
         var remaining = count
         var chunksChain = Chunks()
         var bestRegion: Int = 0

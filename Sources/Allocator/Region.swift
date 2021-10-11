@@ -14,8 +14,8 @@ extension Allocator.Region {
     ///
     mutating func addFreeSpace(_ freeChunk: Allocator.Chunk) {
         guard (freeChunk.count % elementStride) == 0 else { fatalError("Invalid chunk byte count: \(freeChunk.count) != \(elementStride * pageSize)")}
-        for i in stride(from: 0, through: freeChunk.count - elementStride, by: elementStride) {
-//        for i in stride(from: freeChunk.count - elementStride, through: 0, by: -elementStride) {
+//        for i in stride(from: 0, through: freeChunk.count - elementStride, by: elementStride) {
+        for i in stride(from: freeChunk.count - elementStride, through: 0, by: -elementStride) {
             free.append(Allocator.Chunk(address: freeChunk.address + i, count: elementStride))
 //            free.insert(Allocator.Chunk(address: freeChunk.address + i, count: elementStride), orderedBy: \.address)
         }
