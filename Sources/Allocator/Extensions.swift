@@ -7,6 +7,11 @@
 
 import Foundation
 
+extension Allocator.Chunk: CustomStringConvertible {
+    public var description: String {
+        String("address: \(self.address), count: \(self.count)")
+    }
+}
 ///
 extension Allocator.Chunks {
     func print(_ header: String) {

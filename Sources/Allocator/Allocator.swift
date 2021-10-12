@@ -11,7 +11,7 @@ import Foundation
 /// Can provide contiguous chunks of space and also space represented by a seried of contiguous chunks.
 ///
 ///
-public class Allocator {
+public class Allocator: Codable {
     let MEMORY_ALIGNMENT: Int = 8
     let REGION_PAGE_DEFRAG_THRESHOLD: Int = 5
     ///
@@ -45,7 +45,7 @@ public class Allocator {
     public var freeByteCount: Int { return _regions.reduce(_free.reduce(0) { $0 + $1.count}) { $0 + $1.free.reduce(0, { $0 + $1.count  })  }}
     /// Region contains chunks of the same size.
     /// The stored chunks are not ordered in any way.
-    struct Region {
+    struct Region: Codable {
         let elementStride: Int
         let pageSize: Int
         var free: Chunks
@@ -128,17 +128,7 @@ public class Allocator {
                 bestRegion = findBestFitRegion(remaining + overhead, overhead)
             }
             let c = getChunk(from: bestRegion)
-            if c == nil {
-                // Since there wasn't a chunk avaiable, try to use the next smaller chunk size
-                // and keep going down the sizes until there is enough space available or break-out
-                // without allocating anything
-                guard bestRegion > 0 else { break }
-                lookupBestRegion = false // turn off the lookup
-                bestRegion -= 1
-                // Best region must have more space than the overhead.
-                guard _regions[bestRegion].elementStride > overhead else { break }
-            } else {
-                guard let c = c else { break } // Done. Can not allocate.
+            if let c = c {
                 chunksChain.append(c)
                 if (remaining + overhead) <= c.count {
                     // the last allocated chunk provides enough space to store all the info
@@ -149,6 +139,15 @@ public class Allocator {
                 if (remaining + overhead) < _regions[bestRegion].elementStride {
                     lookupBestRegion = true // reenable the lookup in case it was turned off.
                 }
+            } else {
+                // Since there wasn't a chunk avaiable, try to use the next smaller chunk size
+                // and keep going down the sizes until there is enough space available or break-out
+                // without allocating anything
+                guard bestRegion > 0 else { break }
+                lookupBestRegion = false // turn off the lookup
+                bestRegion -= 1
+                // Best region must have more space than the overhead.
+                guard _regions[bestRegion].elementStride > overhead else { break }
             }
         }
         guard remaining == 0 else { deallocate(chunks: chunksChain); return nil }
@@ -166,10 +165,6 @@ public class Allocator {
         { return nil /*fatalError("Failed to allocate memory: \(regpos):\(_regions[regpos].maxCount * _regions[regpos].pageSize)")*/}
         _regions[regpos].addFreeSpace(freeChunk)
         return _regions[regpos].free.removeLast()
-    }
-    ///
-    public func deallocate(address: Int, count: Int) {
-        self.deallocate(Chunk(address: address, count: count))
     }
     ///
     public func deallocate(_ chunk: Chunk) {
