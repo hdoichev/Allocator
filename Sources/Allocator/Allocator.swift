@@ -28,21 +28,6 @@ public class Allocator: Codable {
         }
         public var isValid: Bool { return address != Int.max && count != 0 }
     }
-    ///
-    public typealias Chunks = ContiguousArray<Chunk>
-    var _free = Chunks()
-    let _sumOfLowerRegionsSizes: ContiguousArray<Int>
-    var _defragged: Bool = false
-    var _deallocsCount: Int = 0
-    var _defragesCount: Int = 0
-    var _totalDeallocatedByteCount: Int = 0
-    ///
-    public var totalDeallocatedByteCount: Int { return _totalDeallocatedByteCount }
-    public var totalDeallocsCount: Int { return _deallocsCount }
-    public var defragsCount: Int { return _defragesCount }
-    
-    public var freeChunksCount: Int { return _regions.reduce(_free.count) { $0 + $1.free.count } }
-    public var freeByteCount: Int { return _regions.reduce(_free.reduce(0) { $0 + $1.count}) { $0 + $1.free.reduce(0, { $0 + $1.count  })  }}
     /// Region contains chunks of the same size.
     /// The stored chunks are not ordered in any way.
     struct Region: Codable {
@@ -50,10 +35,30 @@ public class Allocator: Codable {
         let pageSize: Int
         var free: Chunks
     }
+    ///
+    public typealias Chunks = ContiguousArray<Chunk>
     typealias Regions = ContiguousArray<Region>
+    // MARK: - Private Properties
+    let _startAddress: Int
+    let _endAddress: Int
+    var _free = Chunks()
+    let _sumOfLowerRegionsSizes: ContiguousArray<Int>
+    var _defragged: Bool = false
+    var _deallocsCount: Int = 0
+    var _defragesCount: Int = 0
+    var _totalDeallocatedByteCount: Int = 0
     var _regions =  Regions()
+    // MARK: - Public Properties
+    public var totalDeallocatedByteCount: Int { return _totalDeallocatedByteCount }
+    public var totalDeallocsCount: Int { return _deallocsCount }
+    public var defragsCount: Int { return _defragesCount }
+    
+    public var freeChunksCount: Int { return _regions.reduce(_free.count) { $0 + $1.free.count } }
+    public var freeByteCount: Int { return _regions.reduce(_free.reduce(0) { $0 + $1.count}) { $0 + $1.free.reduce(0, { $0 + $1.count  })  }}
     ///
     public init(capacity: Int, start address: Int = 0) {
+        _startAddress = address
+        _endAddress = (capacity == Int.max) ? capacity - _startAddress: address + capacity
         _free.append(Chunk(address: address, count: capacity))
         let REGION_PAGE_BYTE_COUNT:Int = 1*512
         // Init regions by count size
@@ -166,6 +171,7 @@ public class Allocator: Codable {
     ///
     public func deallocate(_ chunk: Chunk) {
         guard chunk.isValid else { return }
+        guard chunk.address >= _startAddress && (chunk.address + chunk.count) <= _endAddress else { return }
         let regpos = _regions.findInsertPosition(chunk.count, orderedBy: \.elementStride, compare: <)
         guard regpos != _regions.count else {
             reclaimFreeStorage(chunk);
