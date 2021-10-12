@@ -97,10 +97,6 @@ public class Allocator: Codable {
         }
         return c
     }
-    ///
-    public func deallocate(chunks: Chunks) {
-        chunks.forEach{ deallocate($0) }
-    }
     /// Allocate space in a non contiguous form. The returned Chunks has a combined count
     /// greater than (or equal) to count. The individual chunks can be of different sizes.
     /// When overhead is non 0 for each chunk (in Chunks) an additinal overhead count is added
@@ -151,6 +147,7 @@ public class Allocator: Codable {
             }
         }
         guard remaining == 0 else { deallocate(chunks: chunksChain); return nil }
+//        print(chunksChain)
         return chunksChain
     }
     /// Allocate a contiguous chunk.
@@ -177,6 +174,10 @@ public class Allocator: Codable {
         _deallocsCount += 1
         _totalDeallocatedByteCount += chunk.count
         _regions[regpos].deallocate(chunk)
+    }
+    ///
+    public func deallocate(chunks: Chunks) {
+        chunks.forEach{ deallocate($0) }
     }
     ///
     func reserveFreeStorage(count: Int) -> Chunk?{
