@@ -56,17 +56,20 @@ public class Allocator: Codable {
     public var freeChunksCount: Int { return _regions.reduce(_free.count) { $0 + $1.free.count } }
     public var freeByteCount: Int { return _regions.reduce(_free.reduce(0) { $0 + $1.count}) { $0 + $1.free.reduce(0, { $0 + $1.count  })  }}
     ///
-    public init(capacity: Int, start address: Int = 0) {
+    public init(capacity: Int, start address: Int = 0, minimumAllocationSize: Int = 32) {
         _startAddress = address
         _endAddress = (capacity == Int.max) ? capacity - _startAddress: address + capacity
         _free.append(Chunk(address: address, count: capacity))
         let REGION_PAGE_BYTE_COUNT:Int = 1*512
         // Init regions by count size
-        let p:ContiguousArray<Int> =
-        [      32,       64,      128,       256,
-              512,     1024,     2048,      4096,
-             8192,    16384,    32768,     65536,
-         128*1024, 256*1024, 512*1024, 1024*1024]
+        var p:ContiguousArray<Int> = ContiguousArray<Int>()
+//        [      32,       64,      128,       256,
+//              512,     1024,     2048,      4096,
+//             8192,    16384,    32768,     65536,
+//         128*1024, 256*1024, 512*1024, 1024*1024]
+        for i in 0..<16 {
+            p.append(minimumAllocationSize * Int(pow(2.0,Double(i))))
+        }
         _sumOfLowerRegionsSizes = p.sunOfLowerElements()
         p.forEach {
             _regions.append(Region(elementStride: $0,
