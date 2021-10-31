@@ -13,7 +13,6 @@ import Foundation
 ///
 public class Allocator: Codable {
     let MEMORY_ALIGNMENT: Int = 8
-    let REGION_PAGE_DEFRAG_THRESHOLD: Int = 5
     ///
     public struct Chunk: Codable {
         public let address: Int
@@ -33,7 +32,11 @@ public class Allocator: Codable {
     struct Region: Codable {
         let size: Int
         let pageSize: Int
-        var free: Chunks
+        var free: Chunks = Chunks()
+        var coalescedCount: Int = 0
+        var distanceFromCoalesced: Int { free.count - coalescedCount }
+        var coalesceThreshold: Int
+        var shouldCoalesce: Bool { distanceFromCoalesced >= coalesceThreshold }
     }
     ///
     public typealias Chunks = ContiguousArray<Chunk>
@@ -67,10 +70,12 @@ public class Allocator: Codable {
             p.append(minimumAllocationSize * Int(pow(2.0,Double(i))))
         }
         _sumOfLowerRegionsSizes = p.sunOfLowerElements()
+        var regpos = 0
         p.forEach {
             _regions.append(Region(size: $0,
                                    pageSize: (REGION_PAGE_BYTE_COUNT > $0) ? REGION_PAGE_BYTE_COUNT / $0: 1,
-                                   free: Chunks()))
+                                   coalesceThreshold: Int(pow(Double.pi*2, Double((p.count + 0) - regpos)))))
+            regpos += 1
         }
     }
     ///
@@ -182,7 +187,7 @@ public class Allocator: Codable {
             return
         }
         _regions[regpos].deallocate(chunk)
-        if (_deallocsCount % 3111) == 0 {
+        if _regions[regpos].shouldCoalesce {
             coalesce(at: regpos)
         }
     }
@@ -240,6 +245,7 @@ public class Allocator: Codable {
         guard position < _regions.count else { return }
         var chunks = Chunks()
         coalesceRegion(region: &_regions[position], coalesced: &chunks)
+        _regions[position].coalescedCount = _regions[position].free.count
         if position + 1 < _regions.count {
             if chunks.isEmpty == false {
                 let pup = position + 1
@@ -291,15 +297,5 @@ extension Allocator.Chunk: Hashable {
     }
     public func hash(into hasher: inout Hasher) {
         hasher.combine(self.address)
-    }
-}
-
-extension Allocator.Region {
-    mutating func removeFree() -> Allocator.Chunk? {
-//        for (k,v) in free {
-//            free.removeValue(forKey:k)
-//            return v
-//        }
-        return nil
     }
 }
