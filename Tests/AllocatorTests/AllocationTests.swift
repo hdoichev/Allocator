@@ -89,7 +89,7 @@ final class AllocatorTests: XCTestCase {
     func testAllocateAllWithOverhead() {
         let overhead = MemoryLayout<Allocator.Chunk>.size
         let allocator = Allocator(capacity: FREE_MEMORY_COUNT_4GB)
-        var a = allocator.allocate(FREE_MEMORY_COUNT_4GB / 2, overhead)
+        var a = allocator.allocate(FREE_MEMORY_COUNT_4GB / 2, overhead: overhead)
         XCTAssertNotNil(a, "Should have allocated an object (Chunks)")
         let allocOverhead = overhead * a!.count
         print((a!.allocatedCount - allocOverhead) >= (FREE_MEMORY_COUNT_4GB / 2))
@@ -98,5 +98,16 @@ final class AllocatorTests: XCTestCase {
         a?.deallocate(allocator)
         XCTAssertEqual(a?.allocatedCount, 0, "Should contain no space at all")
         XCTAssertEqual(allocator.freeByteCount, FREE_MEMORY_COUNT_4GB, "Should have all of the space available")
+    }
+    func testFindInsertPosition() {
+        let iarr = [0,1,2,3,4,5,6,7]
+        print(iarr.findInsertPosition(0))
+        print(iarr.findInsertPosition(7))
+        print(iarr.findInsertPosition(8))
+        ///
+        print("---")
+        print(iarr.findInsertPosition(0, compare: <))
+        print(iarr.findInsertPosition(7, compare: <))
+        print(iarr.findInsertPosition(8, compare: <))
     }
 }

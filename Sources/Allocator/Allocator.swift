@@ -31,19 +31,19 @@ public class Allocator: Codable {
     /// Region contains chunks of the same size.
     /// The stored chunks are not ordered in any way.
     struct Region: Codable {
-        let elementStride: Int
+        let size: Int
         let pageSize: Int
         var free: Chunks
     }
     ///
     public typealias Chunks = ContiguousArray<Chunk>
+    public typealias ChunksDict = [Int: Chunk]
     typealias Regions = ContiguousArray<Region>
     // MARK: - Private Properties
     let _startAddress: Int
     let _endAddress: Int
     var _free = Chunks()
     let _sumOfLowerRegionsSizes: ContiguousArray<Int>
-    var _defragged: Bool = false
     var _deallocsCount: Int = 0
     var _defragesCount: Int = 0
     var _totalDeallocatedByteCount: Int = 0
@@ -63,39 +63,38 @@ public class Allocator: Codable {
         let REGION_PAGE_BYTE_COUNT:Int = 1*512
         // Init regions by count size
         var p:ContiguousArray<Int> = ContiguousArray<Int>()
-//        [      32,       64,      128,       256,
-//              512,     1024,     2048,      4096,
-//             8192,    16384,    32768,     65536,
-//         128*1024, 256*1024, 512*1024, 1024*1024]
         for i in 0..<16 {
             p.append(minimumAllocationSize * Int(pow(2.0,Double(i))))
         }
         _sumOfLowerRegionsSizes = p.sunOfLowerElements()
         p.forEach {
-            _regions.append(Region(elementStride: $0,
+            _regions.append(Region(size: $0,
                                    pageSize: (REGION_PAGE_BYTE_COUNT > $0) ? REGION_PAGE_BYTE_COUNT / $0: 1,
                                    free: Chunks()))
         }
     }
     ///
     func getChunk(from region: Int) -> Chunk? {
-        guard _regions[region].free.isEmpty == true else { return _regions[region].free.removeLast() }
-        guard let freeChunk = reserveFreeStorage(count: _regions[region].elementStride * _regions[region].pageSize) else {
-            return nil /*fatalError("Failed to allocate memory: \(regpos):\(_regions[regpos].maxCount * _regions[regpos].pageSize)")*/}
-        if _regions[region].pageSize > 1 {
-            _regions[region].addFreeSpace(freeChunk)
-            return _regions[region].free.removeLast()
-        } else {
-            return freeChunk
+        guard region < _regions.count else {
+            // fetch from the total free memeory.
+            return reserveFreeStorage(count: _regions.last!.size)
         }
+        if _regions[region].free.isEmpty {
+            // got the upper region and get on og its chunks, which converted into two chunks for the current region
+            if let c = getChunk(from: region + 1) {
+                _regions[region].addFreeSpace(c)
+            }
+        }
+        guard _regions[region].free.isEmpty else { return _regions[region].free.removeLast() }
+        return nil
     }
     ///
     func findBestFitRegion(_ val:Int, _ overhead: Int) -> Int {
-        let c = _regions.findInsertPosition(val, orderedBy: \.elementStride, compare: <)
+        let c = _regions.findInsertPosition(val, orderedBy: \.size, compare: <)
         guard c < _regions.count else { return c - 1 }
         if c > 1 {
-            if _regions[c].elementStride > val && _regions[c-1].elementStride > overhead {
-                let upperBound = _regions[c].elementStride - val
+            if _regions[c].size > val && _regions[c-1].size > overhead {
+                let upperBound = _regions[c].size - val
                 var estimateLowerBound = _sumOfLowerRegionsSizes[c] - (c * overhead)
                 estimateLowerBound = estimateLowerBound > val ? estimateLowerBound - val: val - estimateLowerBound
                 if upperBound > estimateLowerBound {
@@ -140,7 +139,7 @@ public class Allocator: Codable {
                 } else {
                     remaining = remaining.decrementedClampToZero(c.count - overhead)
                 }
-                if (remaining + overhead) < _regions[bestRegion].elementStride {
+                if (remaining + overhead) < _regions[bestRegion].size {
                     lookupBestRegion = true // reenable the lookup in case it was turned off.
                 }
             } else {
@@ -151,7 +150,7 @@ public class Allocator: Codable {
                 lookupBestRegion = false // turn off the lookup
                 bestRegion -= 1
                 // Best region must have more space than the overhead.
-                guard _regions[bestRegion].elementStride > overhead else { break }
+                guard _regions[bestRegion].size > overhead else { break }
             }
         }
         guard remaining == 0 else { deallocate(chunks: chunksChain); return nil }
@@ -160,13 +159,13 @@ public class Allocator: Codable {
     }
     /// Allocate a contiguous chunk.
     ///
-    /// - returns nil: if no contiguous chunk can not be found
+    /// - returns nil: if contiguous chunk can not be found
     ///
     public func allocate(contiguous count: Int) -> Chunk? {
-        let regpos = _regions.findInsertPosition(count, orderedBy: \.elementStride, compare: <)
+        let regpos = _regions.findInsertPosition(count, orderedBy: \.size, compare: <)
         guard regpos != _regions.count else { return reserveFreeStorage(count: count) }// super.allocate(count: count) }
         guard _regions[regpos].free.isEmpty else { return _regions[regpos].free.removeLast() }
-        guard let freeChunk = reserveFreeStorage(count: _regions[regpos].elementStride * _regions[regpos].pageSize) else
+        guard let freeChunk = reserveFreeStorage(count: _regions[regpos].size * _regions[regpos].pageSize) else
         { return nil /*fatalError("Failed to allocate memory: \(regpos):\(_regions[regpos].maxCount * _regions[regpos].pageSize)")*/}
         _regions[regpos].addFreeSpace(freeChunk)
         return _regions[regpos].free.removeLast()
@@ -175,14 +174,17 @@ public class Allocator: Codable {
     public func deallocate(_ chunk: Chunk) {
         guard chunk.isValid else { return }
         guard chunk.address >= _startAddress && (chunk.address + chunk.count) <= _endAddress else { return }
-        let regpos = _regions.findInsertPosition(chunk.count, orderedBy: \.elementStride, compare: <)
+        _deallocsCount += 1
+        _totalDeallocatedByteCount += chunk.count
+        let regpos = _regions.findInsertPosition(chunk.count, orderedBy: \.size, compare: <)
         guard regpos != _regions.count else {
             reclaimFreeStorage(chunk);
             return
         }
-        _deallocsCount += 1
-        _totalDeallocatedByteCount += chunk.count
         _regions[regpos].deallocate(chunk)
+        if (_deallocsCount % 3111) == 0 {
+            coalesce(at: regpos)
+        }
     }
     ///
     public func deallocate(chunks: Chunks) {
@@ -195,16 +197,8 @@ public class Allocator: Codable {
                                                                ((count/MEMORY_ALIGNMENT)+1) * MEMORY_ALIGNMENT
         var position = _free.findInsertPosition(allignedCount, orderedBy: \.count, compare: <)
         if position == _free.count {
-            // Trigger full defrag, looking for memory
-            _defragged = false
-            defrag()
+            coalesce()
             position = _free.findInsertPosition(allignedCount, orderedBy: \.count, compare: <)
-            if position == _free.count {
-                // Lets try a purge. This will dump all regions chunks into the _free pool.
-                _defragged = false
-                defrag(purge: true)
-                position = _free.findInsertPosition(allignedCount, orderedBy: \.count, compare: <)
-            }
         }
         guard position != _free.count else {
             return nil
@@ -219,7 +213,6 @@ public class Allocator: Codable {
     ///
     func reclaimFreeStorage(_ chunk: Chunk) {
         _free.insert(chunk, orderedBy: \.count)
-        _defragged = false
         _deallocsCount += 1
         _totalDeallocatedByteCount += chunk.count
     }
@@ -243,79 +236,70 @@ public class Allocator: Codable {
         _free.sort { $0.count < $1.count }
     }
     ///
+    func coalesce(at position: Int) {
+        guard position < _regions.count else { return }
+        var chunks = Chunks()
+        coalesceRegion(region: &_regions[position], coalesced: &chunks)
+        if position + 1 < _regions.count {
+            if chunks.isEmpty == false {
+                let pup = position + 1
+                chunks.forEach { _regions[pup].free.append($0) }
+                coalesce(at: pup)
+            }
+        } else {
+            chunks.forEach { reclaimFreeStorage($0) }
+        }
+    }
+    ///
     func coalesceRegion(region: inout Region, coalesced: inout Chunks) {
-        let pageByteCount = region.pageSize * region.elementStride
         region.free.sort { $0.address < $1.address }
-        var start_address = Int.max
-        var chunk_count:Int = 0
+        var nonCoalesced = Chunks()
+        var lastChunk = Chunk()
         
         for e in region.free {
-            if start_address == Int.max /*&& e.flags == .Root*/ {
-                start_address = e.address
-                chunk_count = e.count
+            if lastChunk.address == Int.max {
+                lastChunk = e
             } else {
-                if start_address != Int.max && (start_address + chunk_count) == e.address {
-                    chunk_count += e.count
+                if lastChunk.address != Int.max && (lastChunk.address + lastChunk.count) == e.address {
+                    coalesced.append(Chunk(address: lastChunk.address, count: 2 * lastChunk.count))
+                    lastChunk = Chunk()
                 } else {
-                    start_address = Int.max
-                    chunk_count = 0
+                    nonCoalesced.append(lastChunk)
+                    lastChunk = e
                 }
             }
-            if chunk_count == pageByteCount {
-                coalesced.append(Chunk(address: start_address, count: chunk_count))
-                start_address = Int.max
-                chunk_count = 0
-            }
         }
+        if lastChunk.address != Int.max {
+            nonCoalesced.append(lastChunk)
+        }
+        region.free = nonCoalesced
     }
     ///
     public func defrag(purge: Bool = false) {
         _defragesCount += 1
         for i in 0..<_regions.count {
-//            if purge || _regions[i].free.count >= (_regions[i].pageSize * REGION_PAGE_DEFRAG_THRESHOLD) {
-            var coalscedChunks = Chunks()
-            coalesceRegion(region: &_regions[i], coalesced: &coalscedChunks)
-            if coalscedChunks.isEmpty == false {
-                var chunksThatRemain = Chunks()
-                var pos = 0
-                let free_count = _regions[i].free.count
-                _defragged = false
-                for chunkToMove in coalscedChunks {
-                    _deallocsCount += 1
-                    let removeRange = (chunkToMove.address..<chunkToMove.address + chunkToMove.count)
-                    // now go through all _free chunks and skip over the ones that part of the coalesced chunk
-                    // elements that were not coalesced are moved into the chunksThatRemain
-                    while pos != free_count {
-                        if removeRange.contains( _regions[i].free[pos].address ) {
-                            // skip over consequtive chunks that should be excluded from the current page
-                            while pos != free_count && removeRange.contains( _regions[i].free[pos].address ) { pos += 1 }
-                            break // found first chunk that is outside the current exclusion range
-                        } else {
-                            chunksThatRemain.append(_regions[i].free[pos])
-                            pos += 1
-                        }
-                    }
-                }
-                // finsih going through all elements in region._free
-                for toRemain in pos..<free_count {
-                    chunksThatRemain.append(_regions[i].free[toRemain])
-                }
-                _free += coalscedChunks // All of the coalesced chunk go to _free
-                // move all remaining, to the proper location base on 'purge'
-                if purge {
-                    // move every chunk into _free and cleanup the region
-                    _free += chunksThatRemain
-                    _regions[i].free.removeAll()
-                } else {
-                    _regions[i].free = chunksThatRemain
-                }
-            }
-//            }
+            coalesce(at: i)
         }
-        guard _defragged == false else { return }
         //
         coalesce()
-        //
-        _defragged = true
+    }
+}
+
+extension Allocator.Chunk: Hashable {
+    public static func == (_ lhs: Allocator.Chunk, _ rhs: Allocator.Chunk) -> Bool {
+        return lhs.address == rhs.address && lhs.count == rhs.count
+    }
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(self.address)
+    }
+}
+
+extension Allocator.Region {
+    mutating func removeFree() -> Allocator.Chunk? {
+//        for (k,v) in free {
+//            free.removeValue(forKey:k)
+//            return v
+//        }
+        return nil
     }
 }
