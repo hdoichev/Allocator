@@ -74,7 +74,7 @@ public class Allocator: Codable {
         p.forEach {
             _regions.append(Region(size: $0,
                                    pageSize: (REGION_PAGE_BYTE_COUNT > $0) ? REGION_PAGE_BYTE_COUNT / $0: 1,
-                                   coalesceThreshold: Int(pow(Double.pi*2, Double((p.count + 0) - regpos)))))
+                                   coalesceThreshold: Int(pow(1.73205, Double((p.count + 1) - regpos))) ))
             regpos += 1
         }
     }
@@ -281,7 +281,7 @@ public class Allocator: Codable {
         region.free = nonCoalesced
     }
     ///
-    public func defrag(purge: Bool = false) {
+    public func defrag() {
         _defragesCount += 1
         for i in 0..<_regions.count {
             coalesce(at: i)
