@@ -90,8 +90,9 @@ public class Allocator: Codable {
                 _regions[region].addFreeSpace(c)
             }
         }
-        guard _regions[region].free.isEmpty else { return _regions[region].free.removeLast() }
-        return nil
+        guard !_regions[region].free.isEmpty else { return nil }
+        
+        return _regions[region].free.removeLast()
     }
     ///
     func findBestFitRegion(_ val:Int, _ overhead: Int) -> Int {
@@ -168,12 +169,7 @@ public class Allocator: Codable {
     ///
     public func allocate(contiguous count: Int) -> Chunk? {
         let regpos = _regions.findInsertPosition(count, orderedBy: \.size, compare: <)
-        guard regpos != _regions.count else { return reserveFreeStorage(count: count) }// super.allocate(count: count) }
-        guard _regions[regpos].free.isEmpty else { return _regions[regpos].free.removeLast() }
-        guard let freeChunk = reserveFreeStorage(count: _regions[regpos].size * _regions[regpos].pageSize) else
-        { return nil /*fatalError("Failed to allocate memory: \(regpos):\(_regions[regpos].maxCount * _regions[regpos].pageSize)")*/}
-        _regions[regpos].addFreeSpace(freeChunk)
-        return _regions[regpos].free.removeLast()
+        return getChunk(from: regpos)
     }
     ///
     public func deallocate(_ chunk: Chunk) {
@@ -250,7 +246,9 @@ public class Allocator: Codable {
             if chunks.isEmpty == false {
                 let pup = position + 1
                 chunks.forEach { _regions[pup].free.append($0) }
-                coalesce(at: pup)
+                if _regions[pup].shouldCoalesce {
+                    coalesce(at: pup)
+                }
             }
         } else {
             chunks.forEach { reclaimFreeStorage($0) }
